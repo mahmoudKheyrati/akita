@@ -3,6 +3,7 @@ package datarecording
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +28,9 @@ type FastClickHouseRecorder struct {
 	memoryStepBatch           []memoryStepEntryDB
 	locationBatch             []locationEntry
 
+	// Generic batches for unknown table types
+	genericBatches map[string][]any
+
 	// Track which tables exist
 	tables map[string]tableType
 
@@ -50,6 +54,7 @@ const (
 	tableTypeMemoryTransaction
 	tableTypeMemoryStep
 	tableTypeLocation
+	tableTypeGeneric // For unknown table types
 )
 
 // Internal struct types that match the external ones
@@ -161,10 +166,11 @@ func NewFastClickHouseRecorder(host string, port int, database string, username 
 	}
 
 	recorder := &FastClickHouseRecorder{
-		conn:         conn,
-		batchSize:    batchSize,
-		tables:       make(map[string]tableType),
-		locationInfo: make(map[string]int),
+		conn:           conn,
+		batchSize:      batchSize,
+		tables:         make(map[string]tableType),
+		locationInfo:   make(map[string]int),
+		genericBatches: make(map[string][]any),
 	}
 
 	// Register atexit handler
@@ -295,7 +301,87 @@ func (r *FastClickHouseRecorder) detectTableTypeAndCreateSQL(tableName string, s
 		`, tableName), tableTypeLocation
 	}
 
-	panic(fmt.Sprintf("unknown table type: %T", sample))
+	// Generic fallback: use reflection to create schema for unknown types
+	return r.createGenericTableSQL(tableName, sample), tableTypeGeneric
+}
+
+// createGenericTableSQL uses reflection to create a ClickHouse schema for any struct
+func (r *FastClickHouseRecorder) createGenericTableSQL(tableName string, sample any) string {
+	v := reflect.ValueOf(sample)
+	t := v.Type()
+
+	if t.Kind() != reflect.Struct {
+		panic(fmt.Sprintf("sample entry must be a struct, got %T", sample))
+	}
+
+	var fields []string
+	var orderByFields []string
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+
+		// Skip unexported fields
+		if !field.IsExported() {
+			continue
+		}
+
+		fieldName := field.Name
+		clickhouseType := r.goTypeToClickHouseType(field.Type)
+
+		fields = append(fields, fmt.Sprintf("%s %s", fieldName, clickhouseType))
+
+		// Use first field for ORDER BY
+		if len(orderByFields) == 0 {
+			orderByFields = append(orderByFields, fieldName)
+		}
+	}
+
+	// Default ORDER BY if no fields found
+	if len(orderByFields) == 0 {
+		orderByFields = append(orderByFields, "tuple()")
+	}
+
+	createSQL := fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s (
+			%s
+		) ENGINE = MergeTree()
+		ORDER BY (%s)
+	`, tableName, strings.Join(fields, ",\n\t\t\t"), strings.Join(orderByFields, ", "))
+
+	return createSQL
+}
+
+// goTypeToClickHouseType converts Go types to ClickHouse types
+func (r *FastClickHouseRecorder) goTypeToClickHouseType(t reflect.Type) string {
+	switch t.Kind() {
+	case reflect.String:
+		return "String"
+	case reflect.Bool:
+		return "UInt8"
+	case reflect.Int, reflect.Int64:
+		return "Int64"
+	case reflect.Int8:
+		return "Int8"
+	case reflect.Int16:
+		return "Int16"
+	case reflect.Int32:
+		return "Int32"
+	case reflect.Uint, reflect.Uint64:
+		return "UInt64"
+	case reflect.Uint8:
+		return "UInt8"
+	case reflect.Uint16:
+		return "UInt16"
+	case reflect.Uint32:
+		return "UInt32"
+	case reflect.Float32:
+		return "Float32"
+	case reflect.Float64:
+		return "Float64"
+	default:
+		// Default to String for complex types
+		return "String"
+	}
 }
 
 // InsertData inserts data using type-specific fast paths (no reflection!)
@@ -353,6 +439,10 @@ func (r *FastClickHouseRecorder) InsertData(tableName string, entry any) {
 				Locale: e.Locale,
 			})
 		}
+
+	case tableTypeGeneric:
+		// Generic table type - store as-is
+		r.genericBatches[tableName] = append(r.genericBatches[tableName], entry)
 
 	default:
 		r.mu.Unlock()
@@ -486,6 +576,10 @@ func (r *FastClickHouseRecorder) Flush() {
 		case tableTypeLocation:
 			if len(r.locationBatch) > 0 {
 				r.flushLocation(ctx, tableName)
+			}
+		case tableTypeGeneric:
+			if batch, exists := r.genericBatches[tableName]; exists && len(batch) > 0 {
+				r.flushGenericTable(ctx, tableName, batch)
 			}
 		}
 	}
@@ -667,6 +761,51 @@ func (r *FastClickHouseRecorder) flushLocation(ctx context.Context, tableName st
 	}
 
 	r.locationBatch = r.locationBatch[:0]
+}
+
+func (r *FastClickHouseRecorder) flushGenericTable(ctx context.Context, tableName string, entries []any) {
+	if len(entries) == 0 {
+		return
+	}
+
+	batch, err := r.conn.PrepareBatch(ctx, fmt.Sprintf("INSERT INTO %s", tableName))
+	if err != nil {
+		panic(fmt.Errorf("failed to prepare batch for %s: %w", tableName, err))
+	}
+
+	// Use reflection to extract field values from each entry
+	for _, entry := range entries {
+		v := reflect.ValueOf(entry)
+		t := v.Type()
+
+		if t.Kind() != reflect.Struct {
+			panic(fmt.Sprintf("expected struct entry for %s, got %T", tableName, entry))
+		}
+
+		// Collect all field values
+		var values []any
+		for i := 0; i < v.NumField(); i++ {
+			field := t.Field(i)
+			// Skip unexported fields
+			if !field.IsExported() {
+				continue
+			}
+			values = append(values, v.Field(i).Interface())
+		}
+
+		err = batch.Append(values...)
+		if err != nil {
+			panic(fmt.Errorf("failed to append to batch for %s: %w", tableName, err))
+		}
+	}
+
+	err = batch.Send()
+	if err != nil {
+		panic(fmt.Errorf("failed to send batch for %s: %w", tableName, err))
+	}
+
+	// Clear the batch
+	r.genericBatches[tableName] = r.genericBatches[tableName][:0]
 }
 
 // Close flushes remaining data and closes the connection
