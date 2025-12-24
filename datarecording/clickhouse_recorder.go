@@ -225,7 +225,9 @@ func (r *FastClickHouseRecorder) detectTableTypeAndCreateSQL(tableName string, s
 	// Use type assertion to detect table type without reflection
 	sampleStr := fmt.Sprintf("%T", sample)
 
-	if strings.Contains(sampleStr, "taskTableEntry") {
+	// Check for trace-related tables (most important - check first!)
+	// These can be package-qualified like "tracing.taskTableEntry" or unqualified
+	if strings.Contains(sampleStr, "taskTableEntry") || tableName == "trace" {
 		return fmt.Sprintf(`
 			CREATE TABLE IF NOT EXISTS %s (
 				ID String,
@@ -240,7 +242,7 @@ func (r *FastClickHouseRecorder) detectTableTypeAndCreateSQL(tableName string, s
 		`, tableName), tableTypeTask
 	}
 
-	if strings.Contains(sampleStr, "milestoneTableEntry") {
+	if strings.Contains(sampleStr, "milestoneTableEntry") || tableName == "milestone" {
 		return fmt.Sprintf(`
 			CREATE TABLE IF NOT EXISTS %s (
 				ID String,
@@ -254,7 +256,7 @@ func (r *FastClickHouseRecorder) detectTableTypeAndCreateSQL(tableName string, s
 		`, tableName), tableTypeMilestone
 	}
 
-	if strings.Contains(sampleStr, "segmentTableEntry") {
+	if strings.Contains(sampleStr, "segmentTableEntry") || strings.Contains(tableName, "segment") {
 		return fmt.Sprintf(`
 			CREATE TABLE IF NOT EXISTS %s (
 				StartTime Float64,

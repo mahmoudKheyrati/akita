@@ -10,6 +10,7 @@ import (
 
 func extractTaskTableEntry(entry any) taskTableEntryDB {
 	v := reflect.ValueOf(entry)
+	t := v.Type()
 
 	// Validate this is the right structure
 	if v.Kind() != reflect.Struct {
@@ -18,27 +19,29 @@ func extractTaskTableEntry(entry any) taskTableEntryDB {
 
 	result := taskTableEntryDB{}
 
-	// Extract fields by name
-	if field := v.FieldByName("ID"); field.IsValid() {
-		result.ID = field.String()
-	}
-	if field := v.FieldByName("ParentID"); field.IsValid() {
-		result.ParentID = field.String()
-	}
-	if field := v.FieldByName("Kind"); field.IsValid() {
-		result.Kind = field.String()
-	}
-	if field := v.FieldByName("What"); field.IsValid() {
-		result.What = field.String()
-	}
-	if field := v.FieldByName("Location"); field.IsValid() {
-		result.Location = field.String()
-	}
-	if field := v.FieldByName("StartTime"); field.IsValid() {
-		result.StartTime = field.Float()
-	}
-	if field := v.FieldByName("EndTime"); field.IsValid() {
-		result.EndTime = field.Float()
+	// Extract fields by index (MUCH faster than FieldByName)
+	// Expected fields: ID, ParentID, Kind, What, Location, StartTime, EndTime
+	numFields := v.NumField()
+	for i := 0; i < numFields; i++ {
+		field := t.Field(i)
+		fieldValue := v.Field(i)
+
+		switch field.Name {
+		case "ID":
+			result.ID = fieldValue.String()
+		case "ParentID":
+			result.ParentID = fieldValue.String()
+		case "Kind":
+			result.Kind = fieldValue.String()
+		case "What":
+			result.What = fieldValue.String()
+		case "Location":
+			result.Location = fieldValue.String()
+		case "StartTime":
+			result.StartTime = fieldValue.Float()
+		case "EndTime":
+			result.EndTime = fieldValue.Float()
+		}
 	}
 
 	return result
@@ -46,6 +49,7 @@ func extractTaskTableEntry(entry any) taskTableEntryDB {
 
 func extractMilestoneTableEntry(entry any) milestoneTableEntryDB {
 	v := reflect.ValueOf(entry)
+	t := v.Type()
 
 	if v.Kind() != reflect.Struct {
 		panic(fmt.Sprintf("expected struct for milestone entry, got %T", entry))
@@ -53,23 +57,26 @@ func extractMilestoneTableEntry(entry any) milestoneTableEntryDB {
 
 	result := milestoneTableEntryDB{}
 
-	if field := v.FieldByName("ID"); field.IsValid() {
-		result.ID = field.String()
-	}
-	if field := v.FieldByName("TaskID"); field.IsValid() {
-		result.TaskID = field.String()
-	}
-	if field := v.FieldByName("Time"); field.IsValid() {
-		result.Time = field.Float()
-	}
-	if field := v.FieldByName("Kind"); field.IsValid() {
-		result.Kind = field.String()
-	}
-	if field := v.FieldByName("What"); field.IsValid() {
-		result.What = field.String()
-	}
-	if field := v.FieldByName("Location"); field.IsValid() {
-		result.Location = field.String()
+	// Extract fields by index for better performance
+	numFields := v.NumField()
+	for i := 0; i < numFields; i++ {
+		field := t.Field(i)
+		fieldValue := v.Field(i)
+
+		switch field.Name {
+		case "ID":
+			result.ID = fieldValue.String()
+		case "TaskID":
+			result.TaskID = fieldValue.String()
+		case "Time":
+			result.Time = fieldValue.Float()
+		case "Kind":
+			result.Kind = fieldValue.String()
+		case "What":
+			result.What = fieldValue.String()
+		case "Location":
+			result.Location = fieldValue.String()
+		}
 	}
 
 	return result
@@ -77,6 +84,7 @@ func extractMilestoneTableEntry(entry any) milestoneTableEntryDB {
 
 func extractSegmentTableEntry(entry any) segmentTableEntryDB {
 	v := reflect.ValueOf(entry)
+	t := v.Type()
 
 	if v.Kind() != reflect.Struct {
 		panic(fmt.Sprintf("expected struct for segment entry, got %T", entry))
@@ -84,11 +92,18 @@ func extractSegmentTableEntry(entry any) segmentTableEntryDB {
 
 	result := segmentTableEntryDB{}
 
-	if field := v.FieldByName("StartTime"); field.IsValid() {
-		result.StartTime = field.Float()
-	}
-	if field := v.FieldByName("EndTime"); field.IsValid() {
-		result.EndTime = field.Float()
+	// Extract fields by index for better performance
+	numFields := v.NumField()
+	for i := 0; i < numFields; i++ {
+		field := t.Field(i)
+		fieldValue := v.Field(i)
+
+		switch field.Name {
+		case "StartTime":
+			result.StartTime = fieldValue.Float()
+		case "EndTime":
+			result.EndTime = fieldValue.Float()
+		}
 	}
 
 	return result
@@ -96,6 +111,7 @@ func extractSegmentTableEntry(entry any) segmentTableEntryDB {
 
 func extractMemoryTransactionEntry(entry any) memoryTransactionEntryDB {
 	v := reflect.ValueOf(entry)
+	t := v.Type()
 
 	if v.Kind() != reflect.Struct {
 		panic(fmt.Sprintf("expected struct for memory transaction entry, got %T", entry))
@@ -103,26 +119,28 @@ func extractMemoryTransactionEntry(entry any) memoryTransactionEntryDB {
 
 	result := memoryTransactionEntryDB{}
 
-	if field := v.FieldByName("ID"); field.IsValid() {
-		result.ID = field.String()
-	}
-	if field := v.FieldByName("Location"); field.IsValid() {
-		result.Location = field.String()
-	}
-	if field := v.FieldByName("What"); field.IsValid() {
-		result.What = field.String()
-	}
-	if field := v.FieldByName("StartTime"); field.IsValid() {
-		result.StartTime = field.Float()
-	}
-	if field := v.FieldByName("EndTime"); field.IsValid() {
-		result.EndTime = field.Float()
-	}
-	if field := v.FieldByName("Address"); field.IsValid() {
-		result.Address = field.Uint()
-	}
-	if field := v.FieldByName("ByteSize"); field.IsValid() {
-		result.ByteSize = field.Uint()
+	// Extract fields by index for better performance
+	numFields := v.NumField()
+	for i := 0; i < numFields; i++ {
+		field := t.Field(i)
+		fieldValue := v.Field(i)
+
+		switch field.Name {
+		case "ID":
+			result.ID = fieldValue.String()
+		case "Location":
+			result.Location = fieldValue.String()
+		case "What":
+			result.What = fieldValue.String()
+		case "StartTime":
+			result.StartTime = fieldValue.Float()
+		case "EndTime":
+			result.EndTime = fieldValue.Float()
+		case "Address":
+			result.Address = fieldValue.Uint()
+		case "ByteSize":
+			result.ByteSize = fieldValue.Uint()
+		}
 	}
 
 	return result
@@ -130,6 +148,7 @@ func extractMemoryTransactionEntry(entry any) memoryTransactionEntryDB {
 
 func extractMemoryStepEntry(entry any) memoryStepEntryDB {
 	v := reflect.ValueOf(entry)
+	t := v.Type()
 
 	if v.Kind() != reflect.Struct {
 		panic(fmt.Sprintf("expected struct for memory step entry, got %T", entry))
@@ -137,17 +156,22 @@ func extractMemoryStepEntry(entry any) memoryStepEntryDB {
 
 	result := memoryStepEntryDB{}
 
-	if field := v.FieldByName("ID"); field.IsValid() {
-		result.ID = field.String()
-	}
-	if field := v.FieldByName("TaskID"); field.IsValid() {
-		result.TaskID = field.String()
-	}
-	if field := v.FieldByName("Time"); field.IsValid() {
-		result.Time = field.Float()
-	}
-	if field := v.FieldByName("What"); field.IsValid() {
-		result.What = field.String()
+	// Extract fields by index for better performance
+	numFields := v.NumField()
+	for i := 0; i < numFields; i++ {
+		field := t.Field(i)
+		fieldValue := v.Field(i)
+
+		switch field.Name {
+		case "ID":
+			result.ID = fieldValue.String()
+		case "TaskID":
+			result.TaskID = fieldValue.String()
+		case "Time":
+			result.Time = fieldValue.Float()
+		case "What":
+			result.What = fieldValue.String()
+		}
 	}
 
 	return result
