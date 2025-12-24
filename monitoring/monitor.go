@@ -2,6 +2,7 @@ package monitoring
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -218,7 +219,9 @@ func (m *Monitor) StartServer() {
 
 func (m *Monitor) StopServer() {
 	if m.httpServer != nil {
-		err := m.httpServer.Shutdown(nil)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		err := m.httpServer.Shutdown(ctx)
 		if err != nil {
 			log.Printf("Error shutting down server: %v", err)
 		}
