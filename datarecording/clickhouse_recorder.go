@@ -110,7 +110,29 @@ func NewFastClickHouseRecorder(host string, port int, database string, username 
 		batchSize = 100000
 	}
 
-	// Create ClickHouse connection using native protocol
+	// First, connect to the default database to create the target database if needed
+	defaultConn, err := clickhouse.Open(&clickhouse.Options{
+		Addr: []string{fmt.Sprintf("%s:%d", host, port)},
+		Auth: clickhouse.Auth{
+			Database: "default",
+			Username: username,
+			Password: password,
+		},
+		DialTimeout: time.Second * 30,
+	})
+	if err != nil {
+		panic(fmt.Errorf("failed to connect to ClickHouse: %w", err))
+	}
+
+	// Create the database if it doesn't exist
+	createDBSQL := fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", database)
+	if err := defaultConn.Exec(context.Background(), createDBSQL); err != nil {
+		defaultConn.Close()
+		panic(fmt.Errorf("failed to create database %s: %w", database, err))
+	}
+	defaultConn.Close()
+
+	// Now connect to the target database
 	conn, err := clickhouse.Open(&clickhouse.Options{
 		Addr: []string{fmt.Sprintf("%s:%d", host, port)},
 		Auth: clickhouse.Auth{
@@ -129,11 +151,12 @@ func NewFastClickHouseRecorder(host string, port int, database string, username 
 		BlockBufferSize:  10,
 	})
 	if err != nil {
-		panic(fmt.Errorf("failed to connect to ClickHouse: %w", err))
+		panic(fmt.Errorf("failed to connect to ClickHouse database %s: %w", database, err))
 	}
 
 	// Verify connection
 	if err := conn.Ping(context.Background()); err != nil {
+		conn.Close()
 		panic(fmt.Errorf("failed to ping ClickHouse: %w", err))
 	}
 
